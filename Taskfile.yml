@@ -1,0 +1,26 @@
+version: 3
+
+tasks:
+  build:
+    cmds:
+      - go build -v -o ./build/errstack -ldflags "-s -w" ./cmd/errstack
+  test:
+    cmds:
+      - go test -v -count=1 -cpuprofile=cpu.prof -memprofile=mem.prof -benchmem -bench=. ./errstack
+  lint:
+    cmds:
+      - golangci-lint run
+  fmt:
+    cmds:
+      - go fmt ./...
+  tidy:
+    cmds:
+      - go mod tidy
+  clean:
+    cmds:
+      - rm -rf ./bin
+      - rm -rf ./cpu.prof
+      - rm -rf ./mem.prof
+  install/lint:
+    cmds:
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
