@@ -26,51 +26,51 @@ func main() {
 func testWrapWrapVariable() error {
 	err := fmt.Errorf("error")
 	err = errors.Wrap(err, "wrapped")
-	return errors.Wrap(err, "wrapped") // want `errors\.Wrap call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.Wrap(err, "wrapped") // want `Wrap call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }
 func testWrapfWrapVariable() error {
 	err := fmt.Errorf("error")
 	err = errors.Wrap(err, "wrapped")
-	return errors.Wrapf(err, "wrapped") // want `errors\.Wrapf call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.Wrapf(err, "wrapped") // want `Wrapf call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }
 
 func testWithStackWrapVariable() error {
 	err := fmt.Errorf("error")
 	err = errors.Wrap(err, "wrapped")
-	return errors.WithStack(err) // want `errors\.WithStack call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.WithStack(err) // want `WithStack call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }
 func testWrapWrapfVariable() error {
 	err := fmt.Errorf("error")
 	err = errors.WithStack(err)
-	return errors.Wrap(err, "wrapped") // want `errors\.Wrap call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.Wrap(err, "wrapped") // want `Wrap call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }
 func testWrapfWrapfVariable() error {
 	err := fmt.Errorf("error")
 	err = errors.WithStack(err)
-	return errors.Wrapf(err, "wrapped") // want `errors\.Wrapf call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.Wrapf(err, "wrapped") // want `Wrapf call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }
 
 func testWithStackWrapfVariable() error {
 	err := fmt.Errorf("error")
 	err = errors.WithStack(err)
-	return errors.WithStack(err) // want `errors\.WithStack call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.WithStack(err) // want `WithStack call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }
 
 func testWrapWithStackVariable() error {
 	err := fmt.Errorf("error")
 	err = errors.WithStack(err)
-	return errors.Wrap(err, "wrapped") // want `errors\.Wrap call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.Wrap(err, "wrapped") // want `Wrap call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }
 func testWrapfWithStackVariable() error {
 	err := fmt.Errorf("error")
 	err = errors.WithStack(err)
-	return errors.Wrapf(err, "wrapped") // want `errors\.Wrapf call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.Wrapf(err, "wrapped") // want `Wrapf call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }
 
 func testWithStackWithStackVariable() error {
 	err := fmt.Errorf("error")
 	err = errors.WithStack(err)
-	return errors.WithStack(err) // want `errors\.WithStack call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.WithStack(err) // want `WithStack call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }
 
 func testWrapUnwrappedVariable() error {

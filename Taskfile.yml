@@ -24,3 +24,6 @@ tasks:
   install/lint:
     cmds:
       - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+  install/self:
+    cmds:
+      - go install ./cmd/errstack

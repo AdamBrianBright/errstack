@@ -15,7 +15,7 @@ func main() {
 	viper.AddConfigPath("$HOME/.errstack")
 	viper.AddConfigPath(".")
 
-	viper.SetDefault("wrappedFunctions", errstack.DefaultWrappedFunctions)
+	viper.SetDefault("wrapperFunctions", errstack.DefaultWrapperFunctions)
 	viper.SetDefault("cleanFunctions", errstack.DefaultCleanFunctions)
 	viper.SetDefault("threshold", errstack.DefaultThreshold)
 	viper.SetDefault("maxStackDepth", errstack.DefaultMaxStackDepth)
@@ -28,7 +28,7 @@ func main() {
 		}
 	}
 
-	var cfg errstack.Settings
+	var cfg errstack.Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		log.Fatalf("failed to unmarshal config: %v", err)
 	}

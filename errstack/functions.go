@@ -3,15 +3,119 @@ package errstack
 import (
 	"go/ast"
 	"go/types"
-	"golang.org/x/tools/go/packages"
+	"log"
 	"strings"
 )
 
+type Func struct {
+	Ctx     *Ctx
+	CallCtx *Ctx
+	Name    string
+	Method  string
+	Pkg     *types.Package
+	Call    *ast.CallExpr
+	Decl    *ast.FuncDecl
+
+	builtin *bool
+}
+
+func (es *ErrStack) NewFunc(callCtx *Ctx, call *ast.CallExpr, name, method string, pkg *types.Package) *Func {
+	pkgPath := ""
+	if pkg != nil {
+		pkgPath = pkg.Path()
+	}
+
+	fn := &Func{
+		Ctx:     es.NewCtx(pkgPath),
+		CallCtx: callCtx,
+		Name:    name,
+		Method:  method,
+		Pkg:     pkg,
+		Call:    call,
+		Decl:    nil,
+	}
+	fn.LoadDecl()
+
+	return fn
+}
+
+var True = true
+var False = false
+
+func (fn *Func) IsBuiltin() bool {
+	if fn == nil {
+		return false
+	}
+	if fn.builtin != nil {
+		return *fn.builtin
+	}
+
+	if fn.Pkg == nil {
+		fn.builtin = &True
+		return true
+	}
+	path := strings.SplitN(fn.Pkg.Path(), "/", 1)[0]
+	if path == "_" {
+		fn.builtin = &False
+		return false
+	}
+	if path == "command-line-arguments" {
+		fn.builtin = &False
+		return false
+	}
+	if path == "golang.org" {
+		fn.builtin = &True
+		return true
+	}
+	if !strings.Contains(path, ".") {
+		fn.builtin = &True
+		return true
+	}
+
+	fn.builtin = &False
+	return false
+}
+
+// LoadDecl assigns *ast.FuncDecl for function type.
+func (fn *Func) LoadDecl() {
+	if fn == nil {
+		return
+	}
+	if fn.IsBuiltin() {
+		return
+	}
+
+	for _, file := range fn.Ctx.Syntax {
+		for _, decl := range file.Decls {
+			switch decl := decl.(type) {
+			case *ast.FuncDecl:
+				t := fn.Ctx.Info.ObjectOf(decl.Name).(*types.Func).Type().(*types.Signature)
+				recv := t.Recv()
+				r := ""
+				if recv != nil {
+					r = recv.Type().String()
+				}
+				if fn.Method != "" && !strings.HasSuffix(r, fn.Method) {
+					continue
+				}
+				if decl.Name.Name == fn.Name {
+					fn.Decl = decl
+					return
+				}
+			}
+		}
+	}
+
+	return
+}
+
 type FunctionInfo map[string][]string
 
-func (f FunctionInfo) Contains(ctx *Ctx, call *ast.CallExpr) bool {
-	fn, _ := getFunPkg(ctx, call)
+func (f FunctionInfo) Contains(fn *Func) bool {
 	if fn == nil {
+		return false
+	}
+	if fn.Pkg == nil {
 		return false
 	}
 
@@ -29,60 +133,78 @@ func (f FunctionInfo) Contains(ctx *Ctx, call *ast.CallExpr) bool {
 	return false
 }
 
-// findCallFuncDecl returns *ast.FuncDecl for called function.
-func (es *ErrStack) findCallFuncDecl(ctx *Ctx, call *ast.CallExpr) (*Ctx, *ast.FuncDecl) {
-	if call.Fun == nil {
-		return nil, nil
+// getFunc returns imported package of function.
+func (es *ErrStack) getFunc(ctx *Ctx, call *ast.CallExpr) *Func {
+	if ctx == nil {
+		log.Fatalln("getFunc context is nil")
 	}
-	fn, _ := getFunPkg(ctx, call)
-	if fn == nil {
-		return nil, nil
-	}
-	packageInfo := es.getPackage(fn.Pkg.Path())
 
-	return &Ctx{Info: packageInfo.TypesInfo, Fset: packageInfo.Fset}, findFuncDecl(packageInfo, fn.Name)
-}
-
-// findFuncDecl returns *ast.FuncDecl for function type.
-func findFuncDecl(pkg *packages.Package, name string) *ast.FuncDecl {
-	for _, file := range pkg.Syntax {
-		for _, decl := range file.Decls {
-			switch decl := decl.(type) {
-			case *ast.FuncDecl:
-				if decl.Name.Name == name {
-					return decl
-				}
-			}
-		}
-	}
-	return nil
-}
-
-type Func struct {
-	Pkg  *types.Package
-	Name string
-}
-
-// getFunPkg returns imported package of function.
-func getFunPkg(ctx *Ctx, call *ast.CallExpr) (*Func, bool) {
+	callCtx := ctx
 	switch se := call.Fun.(type) {
 	case *ast.SelectorExpr:
-		if id, isIdent := se.X.(*ast.Ident); isIdent {
-			if selObj := ctx.Info.ObjectOf(id); selObj != nil {
-				if pkg, isPkgName := selObj.(*types.PkgName); isPkgName {
-					return &Func{Pkg: pkg.Imported(), Name: se.Sel.Name}, true
+		seSelObj := ctx.Info.ObjectOf(se.Sel)
+		if seSelObj != nil && seSelObj.Pkg() != nil {
+			return es.NewFunc(callCtx, call, se.Sel.Name, "", seSelObj.Pkg())
+		}
+
+		x := se.X
+	_for:
+		for {
+			switch xt := x.(type) {
+			case *ast.SelectorExpr:
+				x = xt.Sel
+			case *ast.CallExpr:
+				fn := es.getFunc(ctx, xt)
+				if fn == nil || fn.IsBuiltin() {
+					return nil
 				}
+				if fn.Decl == nil {
+					return nil
+				}
+				if fn.Decl.Type == nil {
+					return nil
+				}
+				if fn.Decl.Type.Results == nil {
+					return nil
+				}
+				if fn.Decl.Type.Results.List == nil {
+					return nil
+				}
+				x = fn.Decl.Type.Results.List[0].Type
+				ctx = fn.Ctx
+			case *ast.StarExpr:
+				x = xt.X
+			default:
+				break _for
 			}
 		}
-		t, ok2 := ctx.Info.TypeOf(se.X).(*types.Named)
-		if !ok2 || t == nil || t.Obj() == nil {
-			return nil, false
+
+		if x == nil {
+			return nil
 		}
-		return &Func{Pkg: t.Obj().Pkg(), Name: se.Sel.Name}, false
+
+		if id, isIdent := x.(*ast.Ident); isIdent {
+			if selObj := ctx.Info.ObjectOf(id); selObj != nil {
+				switch selObjTyped := selObj.(type) {
+				case *types.PkgName:
+					return es.NewFunc(callCtx, call, se.Sel.Name, "", selObjTyped.Imported())
+				default:
+				}
+			} else {
+			}
+		} else {
+		}
+		if t, ok := ctx.Info.TypeOf(x).(*types.Named); ok && t != nil {
+			return es.NewFunc(callCtx, call, se.Sel.Name, t.String(), t.Obj().Pkg())
+		}
+		return nil
 	case *ast.Ident:
 		obj := ctx.Info.ObjectOf(se)
-		return &Func{Pkg: obj.Pkg(), Name: obj.Name()}, true
+		if obj == nil {
+			return nil
+		}
+		return es.NewFunc(callCtx, call, obj.Name(), "", obj.Pkg())
 	}
 
-	return nil, false
+	return nil
 }

@@ -39,7 +39,7 @@ func TestAnalyzer(t *testing.T) {
 				configFile, err := os.ReadFile(configPath)
 				require.NoError(t, err)
 
-				var config Settings
+				var config Config
 				require.NoError(t, yaml.Unmarshal(configFile, &config))
 				analysistest.Run(t, dirPath, NewAnalyzer(config))
 			} else {
@@ -50,12 +50,9 @@ func TestAnalyzer(t *testing.T) {
 }
 
 func TestExternalPkg(t *testing.T) {
-	dirPath, err := filepath.Abs(path.Join("./testdata", "return_wrapped_variable"))
+	dirPath, err := filepath.Abs(path.Join("./testdata", "external_pkg"))
 	require.NoError(t, err)
-	analysistest.Run(t, dirPath, NewAnalyzer(Settings{
-		WrappedFunctions: DefaultWrappedFunctions,
-		CleanFunctions:   DefaultCleanFunctions,
-		Threshold:        DefaultThreshold,
-		MaxStackDepth:    25,
-	}))
+	settings := NewDefaultConfig()
+	settings.MaxStackDepth = 5
+	analysistest.Run(t, dirPath, NewAnalyzer(settings))
 }

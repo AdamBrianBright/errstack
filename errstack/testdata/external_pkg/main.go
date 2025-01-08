@@ -11,5 +11,5 @@ func main() {
 
 func testWrapExternal() error {
 	_, err := json.Marshal(nil)
-	return errors.Wrap(err, "wrapped") // want `errors\.Wrap call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
+	return errors.Wrap(err, "wrapped") // want `Wrap call unnecessarily wraps error with stacktrace\. Replace with errors\.WithMessage\(\) or fmt\.Errorf\(\)`
 }

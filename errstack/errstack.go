@@ -8,114 +8,165 @@ import (
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/go/packages"
-	"strings"
+	"path/filepath"
+	"slices"
+	"sync"
 )
+
+type PkgFuncs struct {
+	Pkg   string   `mapstructure:"pkg"   yaml:"pkg"`
+	Funcs []string `mapstructure:"funcs" yaml:"funcs"`
+}
 
 var (
-	DefaultWrappedFunctions = map[string][]string{
-		"github.com/pkg/errors": {"New", "Errorf", "Wrap", "Wrapf", "WithStack"},
+	DefaultWrapperFunctions = []PkgFuncs{
+		{Pkg: "github.com/pkg/errors", Funcs: []string{"New", "Errorf", "Wrap", "Wrapf", "WithStack"}},
 	}
-	DefaultCleanFunctions = map[string][]string{
-		"fmt":                   {"Errorf"},
-		"errors":                {"New"},
-		"github.com/pkg/errors": {"WithMessage", "WithMessagef"},
+	DefaultCleanFunctions = []PkgFuncs{
+		{Pkg: "github.com/pkg/errors", Funcs: []string{"WithMessage", "WithMessagef"}},
 	}
-	DefaultThreshold     = .25
-	DefaultMaxStackDepth = 25
+	DefaultThreshold     = .5
+	DefaultMaxStackDepth = 5
 )
 
-type Settings struct {
-	// WrappedFunctions - list of functions that are considered to wrap errors.
+type Config struct {
+	// WrapperFunctions - list of functions that are considered to wrap errors.
 	// If you're using some fancy error wrapping library like github.com/pkg/errors,
 	// you may want to add it to this list.
 	// If you want to ignore some functions, simply don't add them to the list.
-	WrappedFunctions FunctionInfo `mapstructure:"wrappedFunctions" yaml:"wrappedFunctions"`
+	WrapperFunctions []PkgFuncs `mapstructure:"wrapperFunctions" yaml:"wrapperFunctions"`
 	// CleanFunctions - list of functions that are considered to clean errors without stacktrace.
-	CleanFunctions FunctionInfo `mapstructure:"cleanFunctions" yaml:"cleanFunctions"`
+	CleanFunctions []PkgFuncs `mapstructure:"cleanFunctions" yaml:"cleanFunctions"`
 	// Threshold in percentage for the number of branches returning wrapped errors to be considered a violation.
-	// Default value is 25%.
+	// Default value is 50%. Max is 100%.
 	// That means that if there are 3 sources of error that are non-wrapped and one that is wrapped, ErrStack will report an error.
 	// On the other hand, if there are 4 wrapped sources and only one non-wrapped source, ErrStack will not report an error.
 	Threshold float64 `mapstructure:"threshold" yaml:"threshold"`
 	// MaxStackDepth - how many stack frames to check for before giving up.
 	// May impact performance on large codebases and high value.
-	// Default value is 25.
+	// Default value is 5. Max is 50.
 	MaxStackDepth int `mapstructure:"maxStackDepth" yaml:"maxStackDepth"`
 }
 
-func NewDefaultConfig() Settings {
-	return Settings{
-		WrappedFunctions: DefaultWrappedFunctions,
+func NewDefaultConfig() Config {
+	return Config{
+		WrapperFunctions: DefaultWrapperFunctions,
+		CleanFunctions:   DefaultCleanFunctions,
 		Threshold:        DefaultThreshold,
 		MaxStackDepth:    DefaultMaxStackDepth,
 	}
 }
 
+type Settings struct {
+	WrappedFunctions FunctionInfo
+	CleanFunctions   FunctionInfo
+	Threshold        float64
+	MaxStackDepth    int
+}
+
 type ErrStack struct {
-	settings Settings
-	pkgs     map[string]*packages.Package
+	m sync.RWMutex
+
+	settings             Settings
+	wrappedFunctionNames []string
+	pkgs                 map[string]*packages.Package
+	pass                 *analysis.Pass
+	dir                  string
+	isWrappedCache       sync.Map
+	findNodeCache        sync.Map
 }
 
-func NewErrStack(settings Settings) *ErrStack {
+func NewErrStack(config Config) *ErrStack {
+	settings := Settings{
+		WrappedFunctions: FunctionInfo{},
+		CleanFunctions:   FunctionInfo{},
+		Threshold:        config.Threshold,
+		MaxStackDepth:    config.MaxStackDepth,
+	}
+	for _, fs := range config.WrapperFunctions {
+		settings.WrappedFunctions[fs.Pkg] = fs.Funcs
+	}
+	for _, fs := range config.CleanFunctions {
+		settings.CleanFunctions[fs.Pkg] = fs.Funcs
+	}
+	if settings.Threshold > 1 {
+		settings.Threshold = 1
+	}
+	if settings.MaxStackDepth > 50 {
+		settings.MaxStackDepth = 25
+	} else if settings.MaxStackDepth < 1 {
+		settings.MaxStackDepth = 1
+	}
+
+	wrappedFunctionNamesMap := make(map[string]struct{})
+	for _, fs := range settings.WrappedFunctions {
+		for _, f := range fs {
+			wrappedFunctionNamesMap[f] = struct{}{}
+		}
+	}
+	wrappedFunctionNames := make([]string, 0, len(wrappedFunctionNamesMap))
+	for f := range wrappedFunctionNamesMap {
+		wrappedFunctionNames = append(wrappedFunctionNames, f)
+	}
+
 	return &ErrStack{
-		settings: settings,
-		pkgs:     make(map[string]*packages.Package),
+		settings:             settings,
+		wrappedFunctionNames: wrappedFunctionNames,
+		pkgs:                 make(map[string]*packages.Package),
 	}
-}
-
-func (es *ErrStack) getPackage(pkgPath string) *packages.Package {
-	if strings.HasPrefix(pkgPath, "_/") {
-		pkgPath = strings.TrimPrefix(pkgPath, "_")
-	}
-	pkg, ok := es.pkgs[pkgPath]
-	if ok {
-		return pkg
-	}
-
-	pkgs, err := packages.Load(&packages.Config{
-		Mode: packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps,
-	}, pkgPath)
-	if err != nil || len(pkgs) != 1 {
-		return nil
-	}
-	es.pkgs[pkgPath] = pkgs[0]
-	return pkgs[0]
 }
 
 func (es *ErrStack) Run(pass *analysis.Pass) (any, error) {
+	es.m.Lock()
+	es.pass = pass
+	es.dir = filepath.Dir(pass.Fset.Position(pass.Files[0].Pos()).Filename)
+	es.m.Unlock()
 	// pass.ResultOf[inspect.Analyzer] will be set if we've added inspect.Analyzer to Requires.
 	inspecting := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
-	nodeFilter := []ast.Node{ // filter needed nodes: visit only them
-		(*ast.CallExpr)(nil),
-	}
+	ctx := es.NewCtx("")
 
-	inspecting.Preorder(nodeFilter, func(node ast.Node) {
+	inspecting.Preorder([]ast.Node{(*ast.CallExpr)(nil)}, func(node ast.Node) {
 		call := node.(*ast.CallExpr) // Get call expression
-		se, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return
-		}
-		ctx := &Ctx{Info: pass.TypesInfo, Fset: pass.Fset}
 		// No arguments, no need to check
 		if len(call.Args) < 1 {
 			return
 		}
-		// Not a wrapped function, no need to check
-		if !es.settings.WrappedFunctions.Contains(ctx, call) {
+		if se, ok := call.Fun.(*ast.SelectorExpr); ok {
+			if !slices.Contains(es.wrappedFunctionNames, se.Sel.Name) {
+				return
+			}
+		} else if se, ok := call.Fun.(*ast.Ident); ok {
+			if !slices.Contains(es.wrappedFunctionNames, pass.TypesInfo.ObjectOf(se).Name()) {
+				return
+			}
+		} else {
 			return
 		}
-		arg := call.Args[0]
+
+		fn := es.getFunc(ctx, call)
+		if fn == nil {
+			return
+		}
+		// Not a wrapped function, no need to check
+		if fn.IsBuiltin() || !es.settings.WrappedFunctions.Contains(fn) {
+			return
+		}
 
 		// If it's an error, we look for the source of the error and check if it's a wrapped error.
-		wrapped, total := es.isWrapped(ctx, arg, 0, es.settings.MaxStackDepth, false)
-		if float64(wrapped)/float64(total) >= es.settings.Threshold {
-			pass.Reportf(call.Pos(), "%s.%s call unnecessarily wraps error with stacktrace. Replace with errors.WithMessage() or fmt.Errorf()", se.X.(*ast.Ident).Name, se.Sel.Name)
+		wrapped, total := es.isWrapped(ctx, call.Args[0], 0, es.settings.MaxStackDepth, false)
+		if total > 0 && float64(wrapped)/float64(total) >= es.settings.Threshold {
+			pass.Reportf(call.Pos(), "%s call unnecessarily wraps error with stacktrace. Replace with errors.WithMessage() or fmt.Errorf()", fn.Name)
 			return
 		}
 	})
 
 	return nil, nil
+}
+
+type _wrapCache struct {
+	wrapped int
+	total   int
 }
 
 // isWrapped recursively checks if arg was wrapped before.
@@ -125,6 +176,14 @@ func (es *ErrStack) isWrapped(ctx *Ctx, arg ast.Expr, varPos int, maxStackDepth 
 	if maxStackDepth <= 0 {
 		return
 	}
+	if _cached, ok := es.isWrappedCache.Load(arg); ok {
+		_val := _cached.(_wrapCache)
+		return _val.wrapped, _val.total
+	}
+	defer func() {
+		es.isWrappedCache.Store(arg, _wrapCache{wrapped: wrapped, total: total})
+	}()
+
 	maxStackDepth = maxStackDepth - 1
 	switch typedArg := arg.(type) {
 	case *ast.Ident:
@@ -136,9 +195,14 @@ func (es *ErrStack) isWrapped(ctx *Ctx, arg ast.Expr, varPos int, maxStackDepth 
 		switch typedObj := obj.(type) {
 		case *types.Var:
 			if skipVar {
-				return 0, 1
+				wrapped, total = 0, 1
+				return
 			}
 			parentCtx, parent := es.findNodeAtPosition(ctx, typedObj.Pkg().Path(), typedObj.Parent().Pos())
+			if parent == nil {
+				// Parent not found, skip. This can happen if statement is outside of function or method.
+				return
+			}
 			assignments := es.findAssignments(parentCtx, parent, ctx, typedArg)
 			for _, assignment := range assignments {
 				wrapped2, _ := es.isWrapped(parentCtx, assignment.Stmt.Rhs[assignment.RPos], assignment.LPos, maxStackDepth, true)
@@ -151,23 +215,43 @@ func (es *ErrStack) isWrapped(ctx *Ctx, arg ast.Expr, varPos int, maxStackDepth 
 		}
 	case *ast.CallExpr:
 		// It's a function call, find the source and check all return statements for wrapped errors.
-		if typedArg.Fun == nil {
+		fn := es.getFunc(ctx, typedArg)
+		if fn == nil || fn.Decl == nil {
 			return
 		}
-		if es.settings.WrappedFunctions.Contains(ctx, typedArg) {
-			return 1, 1
-		}
-		if es.settings.CleanFunctions.Contains(ctx, typedArg) {
-			return 0, 1
-		}
-
-		funcCtx, funcDecl := es.findCallFuncDecl(ctx, typedArg)
-		if funcDecl == nil {
+		if !fn.IsBuiltin() && es.settings.WrappedFunctions.Contains(fn) {
+			wrapped, total = 1, 1
+			return
+		} else if es.settings.CleanFunctions.Contains(fn) {
+			wrapped, total = 0, 1
 			return
 		}
-		for _, stmt := range funcDecl.Body.List {
+		if varPos >= len(fn.Decl.Type.Results.List) {
+			return
+		}
+		var namedArg *ast.Ident
+		fieldNames := fn.Decl.Type.Results.List[varPos].Names
+		if len(fieldNames) > 0 {
+			namedArg = fieldNames[0]
+		}
+		for _, stmt := range fn.Decl.Body.List {
 			if returnStmt, ok := stmt.(*ast.ReturnStmt); ok {
-				wrapped2, total2 := es.isWrapped(funcCtx, returnStmt.Results[varPos], 0, maxStackDepth, false)
+				idx := 0
+				vpos := 0
+				if len(returnStmt.Results) == 0 {
+					assignments := es.findAssignments(fn.Ctx, fn.Decl, fn.Ctx, namedArg)
+					for _, assignment := range assignments {
+						wrapped2, _ := es.isWrapped(fn.Ctx, assignment.Stmt.Rhs[assignment.RPos], assignment.LPos, maxStackDepth, true)
+						wrapped += wrapped2
+					}
+					total += 1
+					continue
+				}
+				if len(returnStmt.Results) > 1 {
+					idx = varPos
+					vpos = idx
+				}
+				wrapped2, total2 := es.isWrapped(fn.Ctx, returnStmt.Results[idx], vpos, maxStackDepth, false)
 				wrapped += wrapped2
 				total += total2
 			}
@@ -178,30 +262,45 @@ func (es *ErrStack) isWrapped(ctx *Ctx, arg ast.Expr, varPos int, maxStackDepth 
 	}
 }
 
+type _findNodeCache struct {
+	ctx  *Ctx
+	node ast.Node
+}
+
 // findNodeAtPosition finds the node at the given position. Useful for finding the parent of a variable.
 func (es *ErrStack) findNodeAtPosition(ctx *Ctx, pkgPath string, position token.Pos) (*Ctx, ast.Node) {
+	if _cached, ok := es.findNodeCache.Load(position); ok {
+		_val := _cached.(_findNodeCache)
+		return _val.ctx, _val.node
+	}
+
+	nodeCtx := es.NewCtx(pkgPath)
 	pos := ctx.Fset.Position(position)
-	pkg := es.getPackage(pkgPath)
 	var found ast.Node
 
-	for _, file := range pkg.Syntax {
-		if pkg.Fset.Position(file.Pos()).Filename != pos.Filename {
+	for _, file := range nodeCtx.Syntax {
+		if nodeCtx.Fset.Position(file.Pos()).Filename != pos.Filename {
 			continue
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			if node == nil {
 				return true
 			}
-			if pkg.Fset.Position(node.Pos()) == pos {
+			if nodeCtx.Fset.Position(node.Pos()) == pos {
 				found = node
 				return false
 			}
 
 			return true
 		})
+		if found != nil {
+			break
+		}
 	}
 
-	return &Ctx{Info: pkg.TypesInfo, Fset: pkg.Fset}, found
+	es.findNodeCache.Store(position, _findNodeCache{ctx: nodeCtx, node: found})
+
+	return nodeCtx, found
 }
 
 type Assignment struct {

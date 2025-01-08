@@ -12,11 +12,11 @@ func init() {
 }
 
 type Plugin struct {
-	settings Settings
+	settings Config
 }
 
 func New(settings any) (register.LinterPlugin, error) {
-	s, err := register.DecodeSettings[Settings](settings)
+	s, err := register.DecodeSettings[Config](settings)
 	if err != nil {
 		return nil, err
 	}
@@ -34,11 +34,11 @@ func (p *Plugin) BuildAnalyzers() ([]*analysis.Analyzer, error) {
 	}, nil
 }
 
-func NewAnalyzer(settings Settings) *analysis.Analyzer {
+func NewAnalyzer(config Config) *analysis.Analyzer {
 	return &analysis.Analyzer{
 		Name:             "errstack",
 		Doc:              "Checks for unnecessary error wrapping using errors.Wrap, errors.Wrapf, and errors.WithStack",
-		Run:              NewErrStack(settings).Run,
+		Run:              NewErrStack(config).Run,
 		Requires:         []*analysis.Analyzer{inspect.Analyzer},
 		RunDespiteErrors: true,
 	}
