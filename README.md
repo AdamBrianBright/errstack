@@ -24,22 +24,24 @@ You can configure ErrStack using the `.errstack.yaml` file in your project root,
 # you may want to add it to this list.
 # If you want to ignore some functions, simply don't add them to the list.
 wrapperFunctions:
-  - .Wrap(
-  - .Wrapf(
-  - .WithStack(
+  - pkg: github.com/pkg/errors
+    names:
+      - New
+      - Errorf
+      - Wrap
+      - Wrapf
+      - WithStack
 cleanFunctions:
-  - .Errorf(
-  - .WithMessage(
-  - .WithMessagef(
-# Threshold in percentage for the number of branches returning wrapped errors to be considered a violation.
-# Default value is 50%. Max is 100%.
-# That means that if there are 3 sources of error that are non-wrapped and one that is wrapped, ErrStack will report an error.
-# On the other hand, if there are 4 wrapped sources and only one non-wrapped source, ErrStack will not report an error.
-threshold: .5
-# Maximum stack depth to check for before giving up.
-# May impact performance on large codebases and high value.
-# Default value is 5. Max is 50.
-maxStackDepth: 5
+  - pkg: errors
+    names:
+      - New
+  - pkg: fmt
+    names:
+      - Errorf
+  - pkg: github.com/pkg/errors
+    names:
+      - WithMessage
+      - WithMessagef
 ```
 
 ## Usage

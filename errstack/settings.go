@@ -1,8 +1,8 @@
 package errstack
 
 type PkgFunctions struct {
-	Pkg   string
-	Names []string
+	Pkg   string   `mapstructure:"pkg" yaml:"pkg"`
+	Names []string `mapstructure:"names" yaml:"names"`
 }
 
 var (
