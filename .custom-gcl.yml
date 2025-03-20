@@ -1,0 +1,14 @@
+version: v1.64.0
+
+destination: ./errstack/testdata/src
+
+plugins:
+  # a plugin from a Go proxy
+#  - module: 'github.com/AdamBrianBright/errstack'
+#    import: 'github.com/AdamBrianBright/errstack'
+#    version: v1.0.0
+
+  # a plugin from local source
+  - module: 'github.com/AdamBrianBright/errstack'
+    import: 'github.com/AdamBrianBright/errstack/errstack'
+    path: .

@@ -2,6 +2,8 @@
 cpu.prof
 mem.prof
 errstack.test
+custom-gcl
+*.log
 
 ### VisualStudioCode template
 .vscode/
