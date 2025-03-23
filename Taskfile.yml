@@ -5,16 +5,16 @@ tasks:
     cmd: go build -v -o ./build/errstack -ldflags "-s -w" ./cmd/errstack
   test:
     cmds:
-      - go test -v -count=1 -cpuprofile=cpu.prof -memprofile=mem.prof -benchmem -bench=. ./errstack
+      - go test -v -count=1 -cpuprofile=cpu.prof -memprofile=mem.prof -benchmem -bench=. .
   lint:
-    cmd: golangci-lint run ./errstack/... ./cmd/...
+    cmd: golangci-lint run ./...
   fmt:
     cmd: go fmt ./...
   tidy:
     cmd: go mod tidy
   clean:
     silent: true
-    cmd: rm -rf bin cpu.prof mem.prof errstack.test
+    cmd: rm -rf bin cpu.prof mem.prof errstack.test errstack.log
   install/lint:
     cmd: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
   install/self:
@@ -22,10 +22,10 @@ tasks:
   install/custom-gcl:
     cmd: golangci-lint custom
     sources: [ ./**/*.go ]
-    generates: [ ./errstack/testdata/src/custom-gcl ]
+    generates: [ ./testdata/src/custom-gcl ]
   run:
     cmds:
       - ./custom-gcl cache clean
       - ./custom-gcl run ./return_mixed_numbers/...
-    dir: errstack/testdata/src
+    dir: testdata/src
     deps: [ install/custom-gcl ]

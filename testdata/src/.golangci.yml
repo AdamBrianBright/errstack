@@ -2,11 +2,10 @@ linters-settings:
   custom:
     errstack:
       type: "module"
-      description: This is an example usage of a plugin linter.
+      description: Walks through the AST and finds all functions that return an error.
       settings: { }
 
 linters:
   disable-all: true
   enable:
     - errstack
-  fast: false

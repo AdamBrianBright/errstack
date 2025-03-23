@@ -1,4 +1,4 @@
-package errstack
+package model
 
 import "slices"
 

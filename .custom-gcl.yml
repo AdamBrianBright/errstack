@@ -1,14 +1,14 @@
 version: v1.64.0
 
-destination: ./errstack/testdata/src
+destination: ./testdata/src
 
 plugins:
   # a plugin from a Go proxy
 #  - module: 'github.com/AdamBrianBright/errstack'
-#    import: 'github.com/AdamBrianBright/errstack'
-#    version: v1.0.0
+#    import: 'github.com/AdamBrianBright/errstack/cmd/gclplugin'
+#    version: v0.2.0
 
   # a plugin from local source
   - module: 'github.com/AdamBrianBright/errstack'
-    import: 'github.com/AdamBrianBright/errstack/errstack'
+    import: 'github.com/AdamBrianBright/errstack/cmd/gclplugin'
     path: .

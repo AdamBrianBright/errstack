@@ -1,9 +1,4 @@
-package errstack
-
-type PkgFunctions struct {
-	Pkg   string   `mapstructure:"pkg" yaml:"pkg"`
-	Names []string `mapstructure:"names" yaml:"names"`
-}
+package config
 
 var (
 	DefaultWrapperFunctions = []PkgFunctions{
@@ -29,13 +24,17 @@ type Config struct {
 	// If you're using some fancy error wrapping library like github.com/pkg/errors,
 	// you may want to add it to this list.
 	// If you want to ignore some functions, simply don't add them to the list.
-	WrapperFunctions []PkgFunctions `mapstructure:"wrapperFunctions" yaml:"wrapperFunctions"`
+	WrapperFunctions PkgsFunctions `mapstructure:"wrapperFunctions" yaml:"wrapperFunctions,omitempty"`
 	// CleanFunctions - list of functions that are considered to clean errors without stacktrace.
-	CleanFunctions []PkgFunctions `mapstructure:"cleanFunctions" yaml:"cleanFunctions"`
+	CleanFunctions PkgsFunctions `mapstructure:"cleanFunctions" yaml:"cleanFunctions,omitempty"`
+
+	GoRoot  string `mapstructure:"-" yaml:"-"`
+	WorkDir string `mapstructure:"-" yaml:"-"`
+	Debug   bool   `mapstructure:"__debug" yaml:"__debug,omitempty"`
 }
 
-func NewDefaultConfig() Config {
-	return Config{
+func NewDefaultConfig() *Config {
+	return &Config{
 		WrapperFunctions: DefaultWrapperFunctions,
 		CleanFunctions:   DefaultCleanFunctions,
 	}
