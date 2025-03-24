@@ -38,11 +38,11 @@ linters-settings:
         wrapperFunctions:
           - pkg: github.com/pkg/errors
             names: [ New, Errorf, Wrap, Wrapf, WithStack ] 
+            replaceWith: WithMessage
+            replaceWithFormat: WithMessagef
         cleanFunctions:
           - pkg: errors
             names: [ New ]
-          - pkg: fmt
-            names: [ Errorf ]
           - pkg: github.com/pkg/errors
             names: [ WithMessage, WithMessagef ]
 
@@ -63,24 +63,15 @@ You can configure ErrStack using the `.errstack.yaml` file in your project root,
 # If you want to ignore some functions, simply don't add them to the list.
 wrapperFunctions:
   - pkg: github.com/pkg/errors
-    names:
-      - New
-      - Errorf
-      - Wrap
-      - Wrapf
-      - WithStack
+    names: [ New, Errorf, Wrap, Wrapf, WithStack ]
+    replaceWith: WithMessage # Optional. Attempts to replace errors.Wrap like functions with errors.WithMessage.
+    replaceWithFormat: WithMessagef # Optional. Attempts to replace errors.Wrapf like functions with errors.WithMessagef.
 # List of functions that are considered to clean errors without stacktrace.
 cleanFunctions:
-  - pkg: errors
-    names:
-      - New
-  - pkg: fmt
-    names:
-      - Errorf
-  - pkg: github.com/pkg/errors
-    names:
-      - WithMessage
-      - WithMessagef
+    - pkg: errors
+      names: [ New ]
+    - pkg: github.com/pkg/errors
+      names: [ WithMessage, WithMessagef ]
 ```
 
 ## Usage

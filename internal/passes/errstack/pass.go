@@ -1,8 +1,10 @@
 package errstack
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"reflect"
 	"slices"
 
@@ -197,6 +199,9 @@ func (res *Result) analyzeOriginalFunctionBlock(
 		return
 	}
 	info := model.NewInfo(pass)
+	matchWrapping := res.conf.WrapperFunctions.Match
+	replaceWith := res.conf.WrapperFunctions.ReplaceWith
+	replaceWithFunction := res.conf.WrapperFunctions.ReplaceWithFunction
 
 	visited[block] = true
 	log.Log("Visiting block %v\n", block)
@@ -210,7 +215,7 @@ func (res *Result) analyzeOriginalFunctionBlock(
 			switch node := n.(type) {
 			case *ast.CallExpr:
 				fn := res.TryAddCallExpr(info, cfgs, node)
-				if fn == nil || !fn.IsWrapping {
+				if fn == nil || !matchWrapping(fn.Pkg, fn.Name) {
 					return true
 				}
 				var wrapping bool
@@ -223,7 +228,55 @@ func (res *Result) analyzeOriginalFunctionBlock(
 				if wrapping {
 					fn.IsWrapping = true
 					log.Log("Node unnecessarily wraps error with stacktrace %s\n", info.FormatNode(node))
-					pass.Reportf(node.Pos(), "%s call unnecessarily wraps error with stacktrace. Replace with errors.WithMessage() or fmt.Errorf()", fn.Name)
+					errorArgument := res.getErrorArgument(cfgs, info, node)
+					var fixes []analysis.SuggestedFix
+					if errorArgument != nil {
+						if len(node.Args) == 1 {
+							fixes = []analysis.SuggestedFix{
+								{
+									Message: "Remove unnecessary error wrapping",
+									TextEdits: []analysis.TextEdit{
+										{
+											Pos:     node.Pos(),
+											End:     node.End(),
+											NewText: []byte(info.FormatNode(errorArgument)),
+										},
+									},
+								},
+							}
+						} else {
+							message := "Replace unnecessary error wrapping"
+							newText := info.FormatNode(node)
+							if len(node.Args) == 2 {
+								newText = replaceWith(fn.Pkg, fn.Name, newText)
+							} else {
+								newText = replaceWithFunction(fn.Pkg, fn.Name, newText)
+							}
+							if newText != "" {
+								fixes = []analysis.SuggestedFix{
+									{
+										Message: message,
+										TextEdits: []analysis.TextEdit{
+											{
+												Pos:     node.Pos(),
+												End:     node.End(),
+												NewText: []byte(newText),
+											},
+										},
+									},
+								}
+							}
+						}
+					}
+					pass.Report(analysis.Diagnostic{
+						Pos:            node.Pos(),
+						End:            node.End(),
+						Category:       "",
+						Message:        fmt.Sprintf("%s call unnecessarily wraps error with stacktrace. Replace with errors.WithMessage() or fmt.Errorf()", fn.Name),
+						URL:            "",
+						SuggestedFixes: fixes,
+						Related:        nil,
+					})
 				}
 				return true
 			}
@@ -243,7 +296,7 @@ func (res *Result) analyzeOriginalFunctionBlock(
 			for i, expr := range assignStmt.Lhs {
 				if id, idOk := expr.(*ast.Ident); idOk && id != nil {
 					obj := info.Types.ObjectOf(id)
-					if obj == nil || obj.Type().String() != "error" {
+					if !isObjectError(obj) {
 						continue
 					}
 					objPos := info.Fset.Position(obj.Pos())
@@ -336,8 +389,8 @@ func (res *Result) analyzeCallStack(
 	case *ast.Ident:
 		log.Log("Ident %s\n", info.FormatNode(node))
 		if obj := info.Types.ObjectOf(node); obj != nil {
-			log.Log("Ident Object %s\n", obj.Type().String())
-			if obj.Type().String() == "error" {
+			log.Log("Ident Object error\n")
+			if isObjectError(obj) {
 				log.Log("Ident Object is error\n")
 				if variables[info.Fset.Position(obj.Pos())] {
 					log.Log("Ident Object is error and variables[%t]\n", variables[info.Fset.Position(obj.Pos())])
@@ -354,4 +407,60 @@ func (res *Result) analyzeCallStack(
 		return res.analyzeCallStack(pass, cfgs, info, node.X, variables)
 	}
 	return nil
+}
+
+func (res *Result) getErrorArgument(cfgs *ctrlflow.CFGs, info *model.Info, call *ast.CallExpr) ast.Expr {
+	if len(call.Args) == 0 {
+		return nil
+	}
+	for _, rootArg := range call.Args {
+		untypedArg := rootArg
+		for {
+			switch arg := untypedArg.(type) {
+			case *ast.Ident:
+				obj := info.Types.ObjectOf(arg)
+				if isObjectError(obj) {
+					return rootArg
+				}
+			case *ast.CallExpr:
+				fn := res.TryAddCallExpr(info, cfgs, arg)
+				if fn != nil {
+					return rootArg
+				}
+			case *ast.StarExpr:
+				untypedArg = arg.X
+			case *ast.ParenExpr:
+				untypedArg = arg.X
+			case *ast.SelectorExpr:
+				untypedArg = arg.Sel
+			case *ast.IndexExpr:
+				untypedArg = arg.X
+			default:
+				break
+			}
+		}
+	}
+
+	return nil
+}
+
+func isObjectError(obj types.Object) bool {
+	if obj == nil {
+		return false
+	}
+
+	t := obj.Type()
+	var underlying types.Type
+	for t != nil {
+		if t.String() == "error" {
+			return true
+		}
+		underlying = t.Underlying()
+		if underlying == t {
+			break
+		}
+		t = underlying
+	}
+
+	return false
 }

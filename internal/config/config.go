@@ -2,9 +2,14 @@ package config
 
 var (
 	DefaultWrapperFunctions = []PkgFunctions{
-		{Pkg: "github.com/pkg/errors", Names: []string{
-			"New", "Errorf", "Wrap", "Wrapf", "WithStack",
-		}},
+		{
+			Pkg: "github.com/pkg/errors",
+			Names: []string{
+				"New", "Errorf", "Wrap", "Wrapf", "WithStack",
+			},
+			ReplaceWith:       "WithMessage",
+			ReplaceWithFormat: "WithMessagef",
+		},
 	}
 	DefaultCleanFunctions = []PkgFunctions{
 		{Pkg: "github.com/pkg/errors", Names: []string{
@@ -12,9 +17,6 @@ var (
 		}},
 		{Pkg: "errors", Names: []string{
 			"New", "Wrapf", "WithStack",
-		}},
-		{Pkg: "fmt", Names: []string{
-			"Errorf",
 		}},
 	}
 )
