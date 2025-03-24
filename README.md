@@ -24,7 +24,7 @@ destination: ./testdata/src
 plugins:
   - module: 'github.com/AdamBrianBright/errstack'
     import: 'github.com/AdamBrianBright/errstack/cmd/gclplugin'
-    version: v0.2.0
+    version: v0.3.0
 ```
 
 `.golangci.yml`
