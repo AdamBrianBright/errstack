@@ -33,7 +33,7 @@ linters-settings:
   custom:
     errstack:
       type: "module"
-      description: Walks through the AST and finds all functions that return an error.
+      description: Finds unnecessary error wraps with stacktraces.
       settings:
         wrapperFunctions:
           - pkg: github.com/pkg/errors

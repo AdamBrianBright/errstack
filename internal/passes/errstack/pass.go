@@ -21,7 +21,13 @@ import (
 	"golang.org/x/tools/go/cfg"
 )
 
-const _doc = "Walks through the AST and finds all functions that return an error."
+const _doc = `Finds unnecessary error wraps with stacktraces.
+
+1. Finds all functions that return errors.
+2. Finds all calls to functions that return errors.
+3. Marks functions that return wrapped errors.
+4. Analyzes original function CFG and reports if unnecessary wrapping is used.
+`
 
 var Analyzer = &analysis.Analyzer{
 	Name:       "errstack",
