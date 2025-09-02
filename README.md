@@ -7,7 +7,7 @@ It is created as a complement to the [wrapcheck](https://github.com/tomarrell/wr
 
 ## Installation
 
-Go `>= v1.22`
+Go `>= v1.23.12`
 
 ```bash
 go install github.com/AdamBrianBright/errstack/cmd/errstack@latest
@@ -17,14 +17,14 @@ ErrStack can be used as a module for [golangci-lint](https://golangci-lint.run/u
 
 `.custom-gcl.yml`
 ```yaml .custom-gcl.yml
-version: v1.64.0
+version: v1.64.8
 
 destination: ./testdata/src
 
 plugins:
   - module: 'github.com/AdamBrianBright/errstack'
     import: 'github.com/AdamBrianBright/errstack/cmd/gclplugin'
-    version: v0.3.0
+    version: v0.3.3
 ```
 
 `.golangci.yml`
