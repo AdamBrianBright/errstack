@@ -1,4 +1,8 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
 version: 3
+
+env:
+  GOTOOLCHAIN: go1.23.12
 
 tasks:
   build:
@@ -26,6 +30,7 @@ tasks:
   run:
     cmds:
       - ./custom-gcl cache clean
-      - ./custom-gcl run ./return_mixed_numbers/...
+      #      - ./custom-gcl run ./return_mixed_numbers/...
+      - ./custom-gcl run ./rewritten_error/...
     dir: testdata/src
     deps: [ install/custom-gcl ]

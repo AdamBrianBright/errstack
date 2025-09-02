@@ -1,6 +1,6 @@
 module testdata
 
-go 1.22
+go 1.23.12
 
 require (
 	github.com/0xJacky/partialzip v0.2.6

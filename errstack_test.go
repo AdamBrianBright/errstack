@@ -16,10 +16,22 @@ import (
 	_ "golang.org/x/tools/go/analysis/passes/ctrlflow"
 )
 
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	currentDir, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err = os.Chdir(currentDir)
+		require.NoError(t, err)
+	})
+}
+
 func TestAnalyzer(t *testing.T) {
 	// Load the dirs under ./testdata
 	testdata := analysistest.TestData()
-	t.Chdir(testdata + "/src")
+	chdir(t, testdata+"/src")
 
 	files, err := os.ReadDir(testdata + "/src")
 	require.NoError(t, err)
@@ -80,7 +92,7 @@ func TestConfig(t *testing.T) {
 
 func TestSingle(t *testing.T) {
 	testdata := analysistest.TestData()
-	t.Chdir(testdata + "/src")
+	chdir(t, testdata+"/src")
 
 	_ = config.Analyzer.Flags.Set(config.Debug, "true")
 	t.Cleanup(func() {
@@ -88,6 +100,7 @@ func TestSingle(t *testing.T) {
 	})
 
 	r := analysistest.Run(t, testdata, errstack.Analyzer, "cfgs_branches")
+	require.GreaterOrEqual(t, len(r), 1)
 	res := r[0].Result
 
 	result := res.(*helpers.Result[*errstack.Result])
