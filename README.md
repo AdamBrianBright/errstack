@@ -1,21 +1,28 @@
-# ErrStack
+# 🛡️ ErrStack
 
-**ErrStack** is a linter for Go that checks for unnecessary error wrapping using `errors.Wrap`, `errors.Wrapf`, and
-`errors.WithStack`.
+**ErrStack** is a powerful Go linter that detects unnecessary error wrapping using `errors.Wrap`, `errors.Wrapf`, and
+`errors.WithStack`, helping you maintain clean and efficient error handling in your codebase.
 
-It is created as a complement to the [wrapcheck](https://github.com/tomarrell/wrapcheck) linter.
+Created as the perfect complement to the [wrapcheck](https://github.com/tomarrell/wrapcheck) linter.
 
-## Installation
+## 📦 Installation
 
-Go `>= v1.23.12`
+### Requirements
+
+- Go `>= v1.23.12`
+
+### Standalone Installation
 
 ```bash
 go install github.com/AdamBrianBright/errstack/cmd/errstack@latest
 ```
 
+### 🔧 golangci-lint Integration
+
 ErrStack can be used as a module for [golangci-lint](https://golangci-lint.run/usage/linters/#modules).
 
 `.custom-gcl.yml`
+
 ```yaml .custom-gcl.yml
 version: v1.64.8
 
@@ -24,10 +31,11 @@ destination: ./testdata/src
 plugins:
   - module: 'github.com/AdamBrianBright/errstack'
     import: 'github.com/AdamBrianBright/errstack/cmd/gclplugin'
-    version: v0.3.3
+    version: v0.3.4
 ```
 
 `.golangci.yml`
+
 ```yaml .golangci.yml
 linters-settings:
   custom:
@@ -37,12 +45,14 @@ linters-settings:
       settings:
         wrapperFunctions:
           - pkg: github.com/pkg/errors
-            names: [ New, Errorf, Wrap, Wrapf, WithStack ] 
+            names: [ New, Errorf, Wrap, Wrapf, WithStack ]
             replaceWith: WithMessage
             replaceWithFormat: WithMessagef
         cleanFunctions:
           - pkg: errors
             names: [ New ]
+          - pkg: fmt
+            names: [ Errorf ]
           - pkg: github.com/pkg/errors
             names: [ WithMessage, WithMessagef ]
 
@@ -52,7 +62,7 @@ linters:
     - errstack
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 You can configure ErrStack using the `.errstack.yaml` file in your project root, or in your home directory.
 
@@ -64,17 +74,25 @@ You can configure ErrStack using the `.errstack.yaml` file in your project root,
 wrapperFunctions:
   - pkg: github.com/pkg/errors
     names: [ New, Errorf, Wrap, Wrapf, WithStack ]
-    replaceWith: WithMessage # Optional. Attempts to replace errors.Wrap like functions with errors.WithMessage.
-    replaceWithFormat: WithMessagef # Optional. Attempts to replace errors.Wrapf like functions with errors.WithMessagef.
+    replaceWith: WithMessage     # Optional. Attempts to replace errors.Wrap like functions with errors.WithMessage.
+    replaceWithFormat: WithMessagef  # Optional. Attempts to replace errors.Wrapf like functions with errors.WithMessagef.
+
 # List of functions that are considered to clean errors without stacktrace.
 cleanFunctions:
-    - pkg: errors
-      names: [ New ]
-    - pkg: github.com/pkg/errors
-      names: [ WithMessage, WithMessagef ]
+  - pkg: errors
+    names: [ New ]
+  - pkg: fmt
+    names: [ Errorf ]
+  - pkg: github.com/pkg/errors
+    names: [ WithMessage, WithMessagef ]
+
+# Performance tuning options
+includeVendor: true      # Whether to include vendor packages in analysis
+maxDepth: 100           # Maximum depth for analysis to prevent infinite loops
+excludePatterns: [ ]     # Patterns to exclude from analysis (e.g., ["test", "mock"])
 ```
 
-## Usage
+## 🚀 Usage
 
 To lint all the packages in your project, run:
 
@@ -82,11 +100,19 @@ To lint all the packages in your project, run:
 errstack ./...
 ```
 
-## Testing
+You can also target specific packages:
 
-This linter is tested using `analysistest`, you can view all the test cases under `testdata` directory.
+```bash
+errstack ./internal/...
+errstack ./pkg/mypackage
+```
 
-## Why?
+## 🧪 Testing
+
+This linter is thoroughly tested using `analysistest`. You can view all the test cases under the `testdata` directory to
+understand various scenarios and edge cases.
+
+## 🤔 Why ErrStack?
 
 If you're using some fancy error wrapping library
 like [github.com/pkg/errors](https://pkg.go.dev/github.com/pkg/errors), you may have stumbled upon doubling or tripling
@@ -102,17 +128,20 @@ However, if you're using libraries out of your control, you may not be able to e
 may return wrapped errors or not, and just wrap errors from external packages
 like [wrapcheck](https://github.com/tomarrell/wrapcheck) suggests anyways.
 
-This linter helps you to identify such cases, and help you remove unnecessary wrapping.
+This linter helps you identify such cases and remove unnecessary wrapping, keeping your error handling clean and
+efficient.
 
-## How does it work?
+## 🔍 How Does It Work?
 
-1. Preloads all packages and parses their ASTs.
-2. Finds all functions that return errors.
-3. Finds all calls to functions that return errors.
-4. Marks functions that return wrapped errors.
-5. Analyzes original function CFG and reports if unnecessary wrapping is used.
+ErrStack uses advanced static analysis to detect redundant error wrapping:
 
-### Example
+1. **📦 Package Analysis** - Preloads all packages and parses their ASTs
+2. **🎯 Function Discovery** - Finds all functions that return errors
+3. **📞 Call Tracking** - Identifies all calls to error-returning functions
+4. **🏷️ Wrapping Detection** - Marks functions that return wrapped errors
+5. **🔬 Flow Analysis** - Analyzes control flow graphs and reports unnecessary wrapping
+
+### 💡 Example
 
 ```go
 package main

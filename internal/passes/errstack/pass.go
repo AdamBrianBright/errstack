@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"go/types"
 	"reflect"
-	"slices"
 
 	"github.com/AdamBrianBright/errstack/internal/config"
 	"github.com/AdamBrianBright/errstack/internal/helpers"
@@ -21,12 +20,24 @@ import (
 	"golang.org/x/tools/go/cfg"
 )
 
-const _doc = `Finds unnecessary error wraps with stacktraces.
+const _doc = `ErrStack finds unnecessary error wrapping with stacktraces.
 
-1. Finds all functions that return errors.
-2. Finds all calls to functions that return errors.
-3. Marks functions that return wrapped errors.
-4. Analyzes original function CFG and reports if unnecessary wrapping is used.
+The analyzer identifies cases where errors are wrapped multiple times with 
+stacktrace information (e.g., using errors.Wrap, errors.WithStack), which 
+can lead to duplicated stack traces in logs.
+
+Algorithm:
+1. Identifies all functions that return errors
+2. Marks functions that return wrapped errors (with stack traces)
+3. Traces error flow through the call graph
+4. Reports unnecessary wrapping where errors are already wrapped
+
+Configuration:
+- wrapperFunctions: Functions that add stacktraces (e.g., errors.Wrap)
+- cleanFunctions: Functions that don't add stacktraces (e.g., errors.New)
+
+The analyzer supports suggested fixes to replace unnecessary wrapping 
+with simpler alternatives like errors.WithMessage.
 `
 
 var Analyzer = &analysis.Analyzer{
@@ -68,7 +79,7 @@ func run(pass *analysis.Pass) (*Result, error) {
 	return result, nil
 }
 
-// FindFunctionsWithErrors finds all functions that returns errors in the AST.
+// FindFunctionsWithErrors finds all functions that return errors in the AST.
 func (res *Result) FindFunctionsWithErrors(pass *analysis.Pass) {
 	inspectResult := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 	cfgs := pass.ResultOf[ctrlflow.Analyzer].(*ctrlflow.CFGs)
@@ -96,16 +107,29 @@ func (res *Result) FindFunctionsWithErrors(pass *analysis.Pass) {
 	})
 
 	visited := make(map[*model.Function]bool)
-	stack := make(model.Stack[*model.Function], 0, 64)
-	stack.Push(res.OriginalFunctions...)
+	stack := make(model.Stack[*FunctionWithDepth], 0, 64)
+
+	// Initialize stack with original functions at depth 0
+	for _, fn := range res.OriginalFunctions {
+		stack.Push(&FunctionWithDepth{Function: fn, Depth: 0})
+	}
 
 	for item := stack.Pop(); item != nil; item = stack.Pop() {
-		function := *item
-		log.Log("Populating %s: %s\n", function.Name, function.Pos.String())
+		fnWithDepth := *item
+		function := fnWithDepth.Function
+		currentDepth := fnWithDepth.Depth
+
+		log.Log("Populating %s (depth %d): %s\n", function.Name, currentDepth, function.Pos.String())
 		if visited[function] {
 			continue
 		}
 		visited[function] = true
+
+		// Check MaxDepth limit (ignore if MaxDepth <= 0)
+		if res.conf.MaxDepth > 0 && currentDepth >= res.conf.MaxDepth {
+			log.Log("Reached max depth %d for function %s, stopping traversal\n", res.conf.MaxDepth, function.Name)
+			continue
+		}
 
 		ast.Inspect(function.Node, func(n ast.Node) bool {
 			if n == nil {
@@ -118,7 +142,8 @@ func (res *Result) FindFunctionsWithErrors(pass *analysis.Pass) {
 			fn := res.TryAddCallExpr(function.Info, cfgs, n)
 			if fn != nil {
 				fn.CalledBy.AddUnique(function)
-				stack.Push(fn)
+				// Push with incremented depth
+				stack.Push(&FunctionWithDepth{Function: fn, Depth: currentDepth + 1})
 			}
 			return true
 		})
@@ -155,9 +180,18 @@ func (res *Result) propagateWrapping(visited map[*model.Function]bool, function 
 		log.Log("Function %s.%s is not wrapping, skipping function\n", function.Pkg, function.Name)
 		return
 	}
-	stack := slices.Clone(function.CalledBy)
+
+	// Use depth-aware traversal
+	stack := make(model.Stack[*FunctionWithDepth], 0, len(function.CalledBy))
+	for _, caller := range function.CalledBy {
+		stack.Push(&FunctionWithDepth{Function: caller, Depth: 0})
+	}
+
 	for v := stack.Pop(); v != nil; v = stack.Pop() {
-		fn := *v
+		fnWithDepth := *v
+		fn := fnWithDepth.Function
+		currentDepth := fnWithDepth.Depth
+
 		if visited[fn] {
 			continue
 		}
@@ -165,9 +199,20 @@ func (res *Result) propagateWrapping(visited map[*model.Function]bool, function 
 		if res.conf.CleanFunctions.Match(fn.Pkg, fn.Name) {
 			continue
 		}
-		log.Log("Taint function %s.%s: %s\n", fn.Pkg, fn.Name, fn.Pos.String())
+
+		// Check MaxDepth limit (ignore if MaxDepth <= 0)
+		if res.conf.MaxDepth > 0 && currentDepth >= res.conf.MaxDepth {
+			log.Log("Reached max depth %d for propagation to function %s.%s, stopping\n", res.conf.MaxDepth, fn.Pkg, fn.Name)
+			continue
+		}
+
+		log.Log("Taint function %s.%s (depth %d): %s\n", fn.Pkg, fn.Name, currentDepth, fn.Pos.String())
 		fn.IsWrapping = true
-		stack.Push(fn.CalledBy...)
+
+		// Push callers with incremented depth
+		for _, caller := range fn.CalledBy {
+			stack.Push(&FunctionWithDepth{Function: caller, Depth: currentDepth + 1})
+		}
 	}
 }
 
@@ -183,13 +228,18 @@ func (res *Result) AnalyzeOriginalFunctions(pass *analysis.Pass) {
 		}
 		clear(visited)
 		clear(variables)
-		res.analyzeOriginalFunctionBlock(pass, cfgs, v.Block, visited, variables)
+		res.analyzeOriginalFunctionBlock(pass, cfgs, v.Block, visited, variables, 0)
 	}
 }
 
 type StackCall struct {
 	Fn   *model.Function
 	Call *ast.CallExpr
+}
+
+type FunctionWithDepth struct {
+	Function *model.Function
+	Depth    int
 }
 
 // analyzeOriginalFunctionBlock walks over the CFG of the original function and
@@ -200,8 +250,15 @@ func (res *Result) analyzeOriginalFunctionBlock(
 	block *cfg.Block,
 	visited map[*cfg.Block]bool,
 	variables map[token.Position]bool,
+	depth int,
 ) {
 	if block == nil || visited[block] {
+		return
+	}
+
+	// Check MaxDepth limit (ignore if MaxDepth <= 0)
+	if res.conf.MaxDepth > 0 && depth >= res.conf.MaxDepth {
+		log.Log("Reached max depth %d in CFG traversal, stopping\n", res.conf.MaxDepth)
 		return
 	}
 	info := model.NewInfo(pass)
@@ -351,7 +408,7 @@ func (res *Result) analyzeOriginalFunctionBlock(
 		})
 	}
 	for _, branch := range block.Succs {
-		res.analyzeOriginalFunctionBlock(pass, cfgs, branch, visited, variables)
+		res.analyzeOriginalFunctionBlock(pass, cfgs, branch, visited, variables, depth+1)
 	}
 }
 
@@ -377,7 +434,9 @@ func (res *Result) analyzeCallStack(
 		log.Log("CallExpr %s\n", info.FormatNode(node.Fun))
 		fn := res.TryAddCallExpr(info, cfgs, node)
 		if fn == nil {
-			return nil
+			// If we can't find the function, assume it returns a clean error (not wrapped)
+			// This handles standard library functions like json.Marshal properly
+			return &falseValue
 		}
 		log.Log("CallExpr Function %s\n", fn.Name)
 		if fn.IsWrapping {
@@ -410,6 +469,9 @@ func (res *Result) analyzeCallStack(
 		return nil
 	case *ast.StarExpr:
 		log.Log("StarExpr %s\n", info.FormatNode(node))
+		return res.analyzeCallStack(pass, cfgs, info, node.X, variables)
+	case *ast.ParenExpr:
+		log.Log("ParenExpr %s\n", info.FormatNode(node))
 		return res.analyzeCallStack(pass, cfgs, info, node.X, variables)
 	}
 	return nil
@@ -450,23 +512,39 @@ func (res *Result) getErrorArgument(cfgs *ctrlflow.CFGs, info *model.Info, call 
 	return nil
 }
 
+func isErrorType(typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+
+	// Check if it's the built-in error interface
+	if typ.String() == "error" {
+		return true
+	}
+
+	// Check if it implements the error interface
+	errorInterface := types.NewInterfaceType([]*types.Func{
+		types.NewFunc(
+			token.NoPos,
+			nil,
+			"Error",
+			types.NewSignatureType(
+				nil,
+				nil,
+				nil,
+				types.NewTuple(),
+				types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])),
+				false,
+			),
+		),
+	}, nil)
+
+	return types.Implements(typ, errorInterface)
+}
+
 func isObjectError(obj types.Object) bool {
 	if obj == nil {
 		return false
 	}
-
-	t := obj.Type()
-	var underlying types.Type
-	for t != nil {
-		if t.String() == "error" {
-			return true
-		}
-		underlying = t.Underlying()
-		if underlying == t {
-			break
-		}
-		t = underlying
-	}
-
-	return false
+	return isErrorType(obj.Type())
 }

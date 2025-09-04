@@ -1,10 +1,12 @@
 package errstack_test
 
 import (
+	"context"
 	"os"
 	"path"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/AdamBrianBright/errstack/internal/config"
 	"github.com/AdamBrianBright/errstack/internal/helpers"
@@ -105,4 +107,50 @@ func TestSingle(t *testing.T) {
 
 	result := res.(*helpers.Result[*errstack.Result])
 	require.NoError(t, result.Err)
+}
+
+func TestAnalyzerPerformance(t *testing.T) {
+	testdata := analysistest.TestData()
+
+	// Test with a time limit to catch performance issues
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		chdir(t, testdata+"/src")
+		analysistest.Run(t, testdata, errstack.Analyzer, "builtins")
+	}()
+
+	select {
+	case <-done:
+		// Test completed successfully
+	case <-ctx.Done():
+		t.Fatal("Test timed out - performance issue detected")
+	}
+}
+
+func TestFalsePositives(t *testing.T) {
+	// Test cases that should NOT trigger excessive warnings
+	testCases := []string{
+		"interface",    // Interface implementations
+		"external_pkg", // External package usage
+		"method",       // Method calls
+	}
+
+	testdata := analysistest.TestData()
+	chdir(t, testdata+"/src")
+
+	for _, tc := range testCases {
+		t.Run(tc, func(t *testing.T) {
+			// Run analyzer and check for unexpected reports
+			result := analysistest.Run(t, testdata, errstack.Analyzer, tc)
+			require.GreaterOrEqual(t, len(result), 1)
+
+			res := result[0].Result
+			errResult := res.(*helpers.Result[*errstack.Result])
+			require.NoError(t, errResult.Err)
+		})
+	}
 }

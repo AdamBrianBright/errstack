@@ -17,7 +17,7 @@ type Result[T any] struct {
 }
 
 // WrapRun wraps the run function of an analyzer to:
-// (1) convert the return type to Result[T] and put the error in the Result[T].Err field in order
+// (1) convert the return type to Result[T] and put the error in the Result[T].Err field
 // to _not_ stop the analysis and let upper-level analyzer to decide what to do.
 // (2) recover from a panic and convert it to an error with stack traces for easier debugging.
 // This is to ensure that NilAway _never_ panics during the analysis.

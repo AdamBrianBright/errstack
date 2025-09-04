@@ -21,10 +21,11 @@ type NodeInfo struct {
 }
 
 type Result struct {
-	m    sync.Mutex
-	conf *config.Config
-	Pkgs map[string]*packages.Package
-	Objs map[token.Position]NodeInfo
+	mu          sync.RWMutex // Upgraded to read-write mutex for better performance
+	conf        *config.Config
+	Pkgs        map[string]*packages.Package
+	Objs        map[token.Position]NodeInfo
+	cleanupOnce sync.Once
 }
 
 // LoadSelector loads the package containing the given selector and returns its AST.
@@ -32,8 +33,8 @@ func (lp *Result) LoadSelector(info *model.Info, x, sel string) (*model.Info, as
 	var retInfo *model.Info
 	var retNode ast.Node
 
-	lp.m.Lock()
-	defer lp.m.Unlock()
+	lp.mu.RLock()
+	defer lp.mu.RUnlock()
 	for pkgName, pkg := range lp.Pkgs {
 		if pkgName != x && !strings.HasSuffix(pkgName, "/"+x) {
 			continue
@@ -71,8 +72,8 @@ func (lp *Result) LoadSelector(info *model.Info, x, sel string) (*model.Info, as
 
 // LoadObject loads the package containing the given object and returns its AST.
 func (lp *Result) LoadObject(info *model.Info, obj types.Object) (*model.Info, ast.Node) {
-	lp.m.Lock()
-	defer lp.m.Unlock()
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
 
 	objPos := info.Fset.Position(obj.Pos())
 	if existing, ok := lp.Objs[objPos]; ok {
@@ -123,4 +124,19 @@ func (lp *Result) LoadObject(info *model.Info, obj types.Object) (*model.Info, a
 	}
 
 	return info, found
+}
+
+func (lp *Result) Cleanup() {
+	lp.cleanupOnce.Do(func() {
+		lp.mu.Lock()
+		defer lp.mu.Unlock()
+
+		// Clear maps to allow GC
+		for k := range lp.Pkgs {
+			delete(lp.Pkgs, k)
+		}
+		for k := range lp.Objs {
+			delete(lp.Objs, k)
+		}
+	})
 }

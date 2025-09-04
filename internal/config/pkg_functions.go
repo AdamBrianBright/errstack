@@ -14,7 +14,7 @@ type PkgFunctions struct {
 
 type PkgsFunctions []PkgFunctions
 
-// Match returns true if function matches any of package functions.
+// Match returns true if a function matches any of the package functions.
 func (pkgFunctions PkgsFunctions) Match(pkg, name string) bool {
 	for _, item := range pkgFunctions {
 		if item.Pkg == pkg && slices.Contains(item.Names, name) {

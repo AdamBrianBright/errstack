@@ -20,7 +20,7 @@ type Result struct {
 	loader              *preload_packages.Result
 }
 
-// TryAddCallExpr tries to parse AST node as a function call and add its decl to the list of functions with errors.
+// TryAddCallExpr tries to parse an AST node as a function call and add its decl to the list of functions with errors.
 // Returns the position of the function declaration if it was added successfully, nil otherwise.
 func (res *Result) TryAddCallExpr(info *model.Info, cfgs *ctrlflow.CFGs, call ast.Node) *model.Function {
 	if call == nil {
@@ -44,11 +44,47 @@ func (res *Result) TryAddCallExpr(info *model.Info, cfgs *ctrlflow.CFGs, call as
 		if fun.Sel == nil {
 			return nil
 		}
+
+		// Handle external package function calls
+		obj := info.Types.ObjectOf(fun.Sel)
+		if obj != nil {
+			// Get the package path from the object
+			pkg := obj.Pkg()
+			if pkg != nil {
+				pkgPath := pkg.Path()
+				funcName := fun.Sel.Name
+
+				// Check if this is a known wrapper or clean function
+				if res.conf.WrapperFunctions.Match(pkgPath, funcName) || res.conf.CleanFunctions.Match(pkgPath, funcName) {
+					// Create a virtual function entry for external package functions
+					pos := info.Fset.Position(fun.Sel.Pos())
+					if v, ok := res.FunctionsWithErrors[pos]; ok {
+						return v
+					}
+
+					fn := &model.Function{
+						Name:       funcName,
+						Node:       fun,
+						Type:       nil,
+						Body:       nil,
+						Block:      nil,
+						Pos:        pos,
+						IsWrapping: res.conf.WrapperFunctions.Match(pkgPath, funcName),
+						CalledBy:   model.Stack[*model.Function]{},
+						Pkg:        pkgPath,
+						Info:       info,
+					}
+					res.FunctionsWithErrors[pos] = fn
+					return fn
+				}
+			}
+		}
+
+		// Try to load the actual function declaration if it's not a known wrapper/clean function
 		if fun.Sel.Obj != nil && fun.Sel.Obj.Decl != nil {
 			return res.TryAddFunction(info, cfgs, fun.Sel.Obj.Decl)
 		}
 		var decl ast.Node
-		obj := info.Types.ObjectOf(fun.Sel)
 		if obj != nil {
 			info, decl = res.loader.LoadObject(info, obj)
 		} else {
@@ -77,9 +113,9 @@ func (res *Result) TryAddCallExpr(info *model.Info, cfgs *ctrlflow.CFGs, call as
 	return nil
 }
 
-// TryAddFunction tries to parse AST node as a function and add it to the list of functions with errors.
+// TryAddFunction tries to parse an AST node as a function and add it to the list of functions with errors.
 // Returns the position of the function declaration if it was added successfully, nil otherwise.
-// If function is already in the list, returns existing position.
+// If a function is already in the list, it returns the existing position.
 func (res *Result) TryAddFunction(info *model.Info, cfgs *ctrlflow.CFGs, fun any) *model.Function {
 	switch decl := fun.(type) {
 	case *ast.FuncDecl:
@@ -93,15 +129,7 @@ func (res *Result) TryAddFunction(info *model.Info, cfgs *ctrlflow.CFGs, fun any
 
 		var foundError bool
 		for _, f := range decl.Type.Results.List {
-			ident, ok := f.Type.(*ast.Ident)
-			if !ok || ident == nil {
-				continue
-			}
-			identType := info.Types.TypeOf(ident)
-			if identType == nil {
-				continue
-			}
-			if identType.String() == "error" {
+			if fieldType := info.Types.TypeOf(f.Type); isErrorType(fieldType) {
 				foundError = true
 				break
 			}
@@ -134,7 +162,7 @@ func (res *Result) TryAddFunction(info *model.Info, cfgs *ctrlflow.CFGs, fun any
 
 		var foundError bool
 		for _, f := range decl.Type.Results.List {
-			if ident, ok := f.Type.(*ast.Ident); ok && ident != nil && ident.Name == "error" {
+			if fieldType := info.Types.TypeOf(f.Type); isErrorType(fieldType) {
 				foundError = true
 				break
 			}

@@ -2,7 +2,9 @@ package preload_packages
 
 import (
 	"go/token"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/AdamBrianBright/errstack/internal/config"
@@ -44,13 +46,38 @@ func run(pass *analysis.Pass) (*Result, error) {
 		conf, _ := helpers.GetResult[*config.Config](pass, config.Analyzer)
 		result.conf = conf
 
+		// Only load packages in the work directory, exclude vendor and GOROOT by default
+		patterns := []string{result.conf.WorkDir + "/..."}
+		if result.conf.IncludeVendor {
+			patterns = append(patterns, result.conf.WorkDir+"vendor/...")
+		}
+
 		pkgs, err := packages.Load(&packages.Config{
-			Mode: packages.LoadAllSyntax,
-		}, result.conf.GoRoot+"/...", result.conf.WorkDir+"/...", result.conf.WorkDir+"vendor/...")
+			Mode: packages.NeedName | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedSyntax, // Keep NeedSyntax for AST analysis
+			Dir:  result.conf.WorkDir,
+		}, patterns...)
+
 		if err != nil {
 			panic(err)
 		}
+
 		for _, pkg := range pkgs {
+			// Filter out test packages Go packages
+			if strings.HasSuffix(pkg.PkgPath, "_test") {
+				continue
+			}
+			// Check exclude patterns
+			excluded := false
+			for _, pattern := range result.conf.ExcludePatterns {
+				if matched, _ := filepath.Match(pattern, pkg.PkgPath); matched {
+					excluded = true
+					break
+				}
+			}
+			if excluded {
+				continue
+			}
+
 			result.Pkgs[result.conf.GetDirPkgPath(pkg.Dir)] = pkg
 		}
 	})

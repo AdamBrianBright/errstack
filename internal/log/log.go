@@ -39,7 +39,7 @@ func EnableDebug(debug bool) {
 		Log = func(format string, args ...any) {
 			wm.Lock()
 			defer wm.Unlock()
-			_, _ = w.WriteString(fmt.Sprintf(format, args...))
+			_, _ = fmt.Fprintf(w, format, args...)
 		}
 	})
 }

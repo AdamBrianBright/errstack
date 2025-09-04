@@ -24,7 +24,7 @@ func NewInfo(analysisPass *analysis.Pass) *Info {
 	}
 }
 
-// FormatNode returns string representation of node as code.
+// FormatNode returns string representation of a node as code.
 func (pass *Info) FormatNode(node any) string {
 	var buf bytes.Buffer
 	_ = format.Node(&buf, pass.Fset, node)
